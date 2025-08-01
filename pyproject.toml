@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = "==3.12.10"
 dependencies = [
-    "genesis-world",
+#    "genesis-world",
     "pillow==11.2.1",
     "glfw==2.9.0",
     "mujoco==3.3.3",
@@ -16,7 +16,7 @@ dependencies = [
 [tool.uv.sources]
 # Failed to check out commit 963687e7be174dd7dfcb46623d2fb410c9444c8a in the genesis-world repository.
 # 8a26cd410b37a6ef6edb50d0adcd03fcdfa3da3b is OK.
-genesis-world = { git = "https://github.com/Genesis-Embodied-AI/Genesis.git", rev = "7cf9efe7b32ae76df602475ed6cb580c1477f89f" }
+#genesis-world = { git = "https://github.com/Genesis-Embodied-AI/Genesis.git", rev = "7cf9efe7b32ae76df602475ed6cb580c1477f89f" }
 
 torch = [
     { index = "pytorch-cpu", extra = "cpu" },
