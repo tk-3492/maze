@@ -318,7 +318,7 @@ class _SimulationFrame(tk.Frame):
         super().__init__(parent)
 
         self.width = wh.RENDER_WIDTH
-        self.height = wh.WORLD_HEIGHT
+        self.height = wh.RENDER_HEIGHT
 
         self.state = state
 
