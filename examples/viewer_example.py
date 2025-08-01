@@ -7,8 +7,13 @@ def viewer_example():
     settings.Render.RENDER_WIDTH = 480
     settings.Render.RENDER_HEIGHT = 320
 
-    backend = SimpleAnimatedBackend(settings)
-    viewer = GenericTkinterViewer(settings, backend)
+    viewer = GenericTkinterViewer(
+        world_width=settings.Simulation.WORLD_WIDTH,
+        world_height=settings.Simulation.WORLD_HEIGHT,
+        render_width=settings.Render.RENDER_WIDTH,
+        render_height=settings.Render.RENDER_HEIGHT,
+        backend=SimpleAnimatedBackend(settings),
+    )
     viewer.run()
 
 

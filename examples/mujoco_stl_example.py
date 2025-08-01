@@ -36,8 +36,11 @@ def mujoco_stl_example():
     ]
 
     viewer = GenericTkinterViewer(
-        settings,
-        MujocoSTL(settings, render=True),
+        world_width=settings.Simulation.WORLD_WIDTH,
+        world_height=settings.Simulation.WORLD_HEIGHT,
+        render_width=settings.Render.RENDER_WIDTH,
+        render_height=settings.Render.RENDER_HEIGHT,
+        backend=MujocoSTL(settings, render=True),
     )
     viewer.run()
 
