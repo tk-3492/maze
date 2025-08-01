@@ -1,3 +1,4 @@
+import dataclasses
 import enum
 import tkinter as tk
 from tkinter import ttk
@@ -18,9 +19,17 @@ class SimulationRunningMode(enum.Enum):
     ONE_STEP = "one_step"
 
 
+@dataclasses.dataclass
+class WidthAndHeight:
+    WORLD_WIDTH: float
+    WORLD_HEIGHT: float
+    RENDER_WIDTH: int
+    RENDER_HEIGHT: int
+
+
 class _SimulationState:
-    def __init__(self, width: int, height: int):
-        self.rgb_buffer: np.ndarray = np.zeros((height, width, 3), dtype=np.uint8)
+    def __init__(self, wh: WidthAndHeight):
+        self.rgb_buffer: np.ndarray = np.zeros((wh.RENDER_HEIGHT, wh.RENDER_WIDTH, 3), dtype=np.uint8)
         self.buffer_update_timestamp: Optional[float] = time.time()
 
         self.running_mode: SimulationRunningMode = SimulationRunningMode.RUNNING
@@ -215,7 +224,7 @@ class SimulationControlPanel(tk.Frame):
 
 
 class CameraControlPanel(ttk.Frame):
-    def __init__(self, parent_frame: ttk.Frame, settings: Settings, state: _SimulationState):
+    def __init__(self, parent_frame: ttk.Frame, wh: WidthAndHeight, state: _SimulationState):
         super().__init__(parent_frame)
         self.state = state
 
@@ -242,8 +251,8 @@ class CameraControlPanel(ttk.Frame):
             pos_scale.pack(fill=tk.X, pady=2)
 
         for label, var, range_min, range_max in [
-            ("X:", self.lookat_x_var, -settings.Simulation.WORLD_WIDTH * 0.5, settings.Simulation.WORLD_WIDTH * 0.5),
-            ("Y:", self.lookat_y_var, -settings.Simulation.WORLD_HEIGHT * 0.5, settings.Simulation.WORLD_HEIGHT * 0.5),
+            ("X:", self.lookat_x_var, -wh.WORLD_WIDTH * 0.5, wh.WORLD_WIDTH * 0.5),
+            ("Y:", self.lookat_y_var, -wh.WORLD_HEIGHT * 0.5, wh.WORLD_HEIGHT * 0.5),
         ]:
             _install_scale_helper(var, range_min, range_max, label)
 
@@ -286,14 +295,14 @@ class SimulationInfoPanel(ttk.LabelFrame):
 
 
 class ControlPanel(ttk.Frame):
-    def __init__(self, parent, settings: Settings, state: _SimulationState, backend_name: str = "Unknown"):
+    def __init__(self, parent, wh: WidthAndHeight, state: _SimulationState, backend_name: str = "Unknown"):
         super().__init__(parent)
         self.state = state
 
         self.simulation_panel = SimulationControlPanel(self, state)
         self.simulation_panel.pack(fill=tk.X, pady=(0, 10))
 
-        self.camera_panel = CameraControlPanel(self, settings, state)
+        self.camera_panel = CameraControlPanel(self, wh, state)
         self.camera_panel.pack(fill=tk.X, pady=(0, 10))
 
         self.info_panel = SimulationInfoPanel(self, state, backend_name)
@@ -305,11 +314,11 @@ class ControlPanel(ttk.Frame):
 
 
 class _SimulationFrame(tk.Frame):
-    def __init__(self, parent, width, height, state: _SimulationState):
+    def __init__(self, parent, wh: WidthAndHeight, state: _SimulationState):
         super().__init__(parent)
 
-        self.width = width
-        self.height = height
+        self.width = wh.RENDER_WIDTH
+        self.height = wh.WORLD_HEIGHT
 
         self.state = state
 
@@ -357,24 +366,24 @@ class _SimulationFrame(tk.Frame):
 
 
 class _TopWindow(tk.Tk):
-    def __init__(self, state: _SimulationState, settings: Settings, backend_name: str = "Unknown"):
+    def __init__(self, state: _SimulationState, wh: WidthAndHeight, backend_name: str = "Unknown"):
         super().__init__()
 
         self.state = state
         self.logger = logging.getLogger(__name__)
 
-        self._setup_ui(settings, backend_name)
+        self._setup_ui(wh, backend_name)
         self._schedule_ui_update()
 
-    def _setup_ui(self, settings: Settings, backend_name: str):
+    def _setup_ui(
+            self, wh: WidthAndHeight, backend_name: str
+    ):
         self.title("Generic Simulator Viewer")
 
-        self.simulation_frame = _SimulationFrame(
-            self, settings.Render.RENDER_WIDTH, settings.Render.RENDER_HEIGHT, self.state
-        )
+        self.simulation_frame = _SimulationFrame(self, wh, self.state)
         self.simulation_frame.pack(side=tk.LEFT, padx=10, pady=10)
 
-        self.control_panel = ControlPanel(self, settings, self.state, backend_name)
+        self.control_panel = ControlPanel(self, wh, self.state, backend_name)
         self.control_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=10)
 
     def _schedule_ui_update(self):
@@ -387,18 +396,23 @@ class _TopWindow(tk.Tk):
 
 
 class GenericTkinterViewer:
-    def __init__(self, settings: Settings, backend: SimulatorBackend):
+    def __init__(
+            self,
+            world_width: float, world_height: float,
+            render_width: int, render_height: int,
+            backend: SimulatorBackend
+    ):
+        wh = WidthAndHeight(world_width, world_height, render_width, render_height)
+
         self.backend = backend
         self.logger = logging.getLogger(__name__)
 
-        self.state = _SimulationState(
-            settings.Render.RENDER_WIDTH, settings.Render.RENDER_HEIGHT
-        )
+        self.state = _SimulationState(wh)
 
         self.simulation = _Simulation(backend, self.state)
 
         backend_name = getattr(backend, '__class__', type(backend)).__name__
-        self._viewer = _TopWindow(self.state, settings, backend_name)
+        self._viewer = _TopWindow(self.state, wh, backend_name)
 
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
