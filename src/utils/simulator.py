@@ -1,126 +1,114 @@
-import abc
-
-import numpy as np
-import torch
 import mujoco
+import numpy as np
 
-from framework.prelude import *
-from framework.environment import rand_food_pos
-from framework.backends import MujocoSTL
-from framework.utils import Timer
-
-
-class Loss(metaclass=abc.ABCMeta):
-    @abc.abstractmethod
-    def __init__(self, settings: Settings, robot_positions, food_positions, nest_position):
-        raise NotImplementedError("Subclasses should implement this method.")
-
-    @abc.abstractmethod
-    def as_float(self) -> float:
-        raise NotImplementedError("Subclasses should implement this method.")
+from framework.interfaces import SimulatorBackend
+from framework.environment import add_texture, add_material, add_geom
+from framework.prelude import Settings
 
 
-class Simulator(MujocoSTL, abc.ABC):
-    def __init__(self, settings: Settings, parameters: Individual, controller: torch.nn.Module, render: bool = False):
-        super().__init__(settings, render)
+def generate_spec(settings: Settings):
+    spec = mujoco.MjSpec()
 
-        self.timer = Timer(settings.Robot.THINK_INTERVAL / settings.Simulation.TIME_STEP)
-        self.rng = np.random.default_rng(parameters.generation)
+    visual: mujoco._specs.MjVisual = spec.visual
+    visual.global_.offwidth = settings.Render.RENDER_WIDTH
+    visual.global_.offheight = settings.Render.RENDER_HEIGHT
 
-        self.parameters = parameters
-        self.scores: list[Loss] = []
-        self.sensors: list[list[SensorInterface]] = self.create_sensors()
-
-        self.dummy_foods: list[DummyFoodValues] = []
-
-        self.controller = controller
-        self.input_ndarray = np.zeros((settings.Robot.NUM, 2 * 3), dtype=np.float32)
-        self.output_ndarray = np.zeros((settings.Robot.NUM, 2), dtype=np.float32)
-        self.input_tensor = torch.from_numpy(self.input_ndarray)
-
-        torch.nn.utils.vector_to_parameters(
-            torch.tensor(parameters, dtype=torch.float32),
-            self.controller.parameters()
+    add_texture(
+        spec,
+        name="simple_checker",
+        type_=mujoco.mjtTexture.mjTEXTURE_2D,
+        builtin=mujoco.mjtBuiltin.mjBUILTIN_CHECKER,
+        width=256,
+        height=256,
+        rgb1=(1.0, 1.0, 1.0),
+        rgb2=(0.7, 0.7, 0.7)
+    )
+    add_material(
+        spec,
+        name="ground",
+        texture="simple_checker",
+        texrepeat=(
+            settings.Simulation.WORLD_WIDTH * 0.5,
+            settings.Simulation.WORLD_HEIGHT * 0.5
         )
+    )
+
+    add_geom(
+        spec.worldbody,
+        geom_type=mujoco.mjtGeom.mjGEOM_PLANE,
+        pos=(0, 0, 0),
+        size=(settings.Simulation.WORLD_WIDTH * 0.5, settings.Simulation.WORLD_HEIGHT * 0.5, 1),
+        material="ground",
+    )
+
+    rng = np.random.default_rng()
+    xs = rng.uniform(
+        -settings.Simulation.WORLD_WIDTH * 0.5, settings.Simulation.WORLD_WIDTH * 0.5, (3,)
+    )
+    ys = rng.uniform(
+        -settings.Simulation.WORLD_HEIGHT * 0.5, settings.Simulation.WORLD_HEIGHT * 0.5, (3,)
+    )
+    for x, y in zip(xs, ys):
+        add_geom(
+            spec.worldbody,
+            geom_type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=(0.5, 0.5, 0.5),  # BoxであってもSizeは中心からの半径のように設定するため1m x 1m x 1mは(0.5, 0.5, 0.5)になる
+            rgba=(0.7, 0.7, 0.7, 1.0),
+            pos=(x, y, 0.5),
+        )
+
+    return spec
+
+
+class Simulator(SimulatorBackend):
+    def __init__(self, settings: Settings, render: bool = False):
+        self.settings = settings
+        self._do_render = render
+
+        self.render_shape = (settings.Render.RENDER_WIDTH, settings.Render.RENDER_HEIGHT)
+        self.camera = mujoco.MjvCamera()
+
+        self.spec = generate_spec(settings)
+        self.model = self.spec.compile()
+        self.data = mujoco.MjData(self.model)
 
         mujoco.mj_step(self.model, self.data)
 
     def reset(self):
-        mujoco.mj_resetData(self.model, self.data)
-        self.dummy_foods.clear()
-
-    @abc.abstractmethod
-    def create_sensors(self) -> list[list[SensorInterface]]:
-        raise NotImplementedError("Subclasses should implement this method.")
-
-    @abc.abstractmethod
-    def create_input_for_controller(self):
-        raise NotImplementedError("Subclasses should implement this method.")
-
-    @abc.abstractmethod
-    def evaluation(self) -> Loss:
-        raise NotImplementedError("Subclasses should implement this method.")
+        self.spec = generate_spec(self.settings)
+        self.model = self.spec.compile()
+        self.data = mujoco.MjData(self.model)
 
     def step(self):
-        if self.timer.tick():
-            with torch.no_grad():
-                input_ = self.create_input_for_controller()
-                output = self.controller(input_)
-                self.output_ndarray = output.numpy()
-
-        for i, robot in enumerate(self.robot_values):
-            robot.act(
-                right_wheel=self.output_ndarray[i, 0],
-                left_wheel=self.output_ndarray[i, 1]
-            )
-
-        self.check_and_respawn_food()
-
         mujoco.mj_step(self.model, self.data)
 
-        loss = self.evaluation()
-        self.scores.append(loss)
+    def render(self, img_buf: np.ndarray, pos: tuple[float, float, float], lookat: tuple[float, float, float]):
+        if img_buf is None:
+            return
+
+        try:
+            pos = np.array(pos)
+            lookat = np.array(lookat)
+            sub = pos - lookat
+            self.camera.lookat[:] = lookat
+            self.camera.distance = np.linalg.norm(sub)
+            self.camera.azimuth = np.arctan2(
+                sub[1], sub[0]
+            ) * 180 / mujoco.mjPI + 180
+            self.camera.elevation = -np.arcsin(
+                sub[2] / self.camera.distance
+            ) * 180 / mujoco.mjPI
+
+            if self._do_render:
+                with mujoco.Renderer(self.model, width=self.render_shape[0], height=self.render_shape[1]) as renderer:
+                    renderer.update_scene(self.data, self.camera)
+                    renderer.render(out=img_buf)
+
+        except Exception as e:
+            img_buf.fill(0)
 
     def get_scores(self) -> list[float]:
-        return [s.as_float() for s in self.scores]
+        return []
 
     def calc_total_score(self) -> float:
-        regularization_loss = self.settings.Loss.REGULARIZATION_COEFFICIENT * self.parameters.norm
-        return sum(s.as_float() for s in self.scores) + regularization_loss
-
-    def _is_food_in_nest(self, food_values: FoodValues) -> bool:
-        food_pos = food_values.xpos
-        nest_pos = self.nest_site.xpos[0:2]
-        nest_radius = self.settings.Nest.RADIUS
-
-        distance = np.linalg.norm(food_pos - nest_pos)
-        return distance <= nest_radius
-
-    def _respawn_food(self, food_values: FoodValues):
-        dummy_food = DummyFoodValues(food_values)
-        self.dummy_foods.append(dummy_food)
-
-        invalid_area = [
-            (Position(self.nest_site.xpos[0], self.nest_site.xpos[1]), self.settings.Nest.RADIUS)
-        ]
-
-        for food in self.food_values:
-            if food is not food_values:
-                invalid_area.append(
-                    (food.position, self.settings.Food.RADIUS)
-                )
-
-        new_position = rand_food_pos(self.settings, invalid_area, self.rng)
-
-        food_joint = food_values.joint
-
-        food_joint.qpos[0] = new_position.x
-        food_joint.qpos[1] = new_position.y
-        food_joint.qpos[2] = 1
-        food_joint.qvel[:] = 0.0
-        food_joint.qacc[:] = 0.0
-
-    def check_and_respawn_food(self):
-        for food in self.food_values:
-            if self._is_food_in_nest(food):
-                self._respawn_food(food)
+        return 0
