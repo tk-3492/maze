@@ -12,8 +12,8 @@ class DirectionSensor(SensorInterface):
         self.target_radius = target_radius
 
     def get(self) -> np.ndarray:
-        direction = self.robot_values.xdirection
-        center = self.robot_values.xpos
+        direction = self.robot_values.xdirection[:2]
+        center = self.robot_values.xpos[:2]
         target = self.target.xpos[0:2]
 
         direction_matrix = np.array([

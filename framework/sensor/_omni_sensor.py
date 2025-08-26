@@ -45,8 +45,8 @@ class OmniSensor(SensorInterface):
         if len(self.targets) == 0:
             return np.zeros(2)
 
-        bot_direction = self.robot.xdirection
-        bot_pos = self.robot.xpos
+        bot_direction = self.robot.xdirection[:2]
+        bot_pos = self.robot.xpos[:2]
 
         direction = np.array([
             [bot_direction[1], -bot_direction[0]],

@@ -64,7 +64,7 @@ class RobotValues:
 
     @property
     def xpos(self):
-        return self._center_site.xpos[0:2]
+        return self._center_site.xpos[0:3]
 
     def _xdirection(self):
         self._xdirection_buf[:] = self._front_site.xpos[0:3]
